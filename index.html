@@ -1,0 +1,833 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Layers">
+<meta name="theme-color" content="#000000">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-192.png">
+<link rel="manifest" href="manifest.json">
+<title>Layers</title>
+<style>
+  :root {
+    --fg: #fff;
+    --dim: rgba(255,255,255,.62);
+    --glass: rgba(18,18,20,.58);
+    --line: rgba(255,255,255,.16);
+    --rec: #ff3b30;
+    --brass: #e9b44c;
+    --sheet: #161618;
+    --row: #222225;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; background: #000; color: var(--fg);
+    font: 15px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    overflow: hidden; position: fixed; inset: 0;
+    -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+  }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  button:disabled { opacity: .35; }
+  svg.i { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+  #app { position: fixed; inset: 0; }
+  #preview { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #000; }
+  #preview.mirror { transform: scaleX(-1); }
+
+  /* top bar */
+  #top {
+    position: absolute; top: 0; left: 0; right: 0;
+    padding: calc(env(safe-area-inset-top) + 10px) 16px 28px;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    background: linear-gradient(rgba(0,0,0,.6), transparent);
+  }
+  #layerTag { display: flex; flex-direction: column; gap: 2px; padding-top: 4px; }
+  #layerNum { font-size: 22px; font-weight: 700; letter-spacing: -.01em; }
+  #loopLen { font-size: 13px; color: var(--dim); font-variant-numeric: tabular-nums; }
+  .topBtns { display: flex; gap: 10px; }
+  .icon {
+    position: relative; width: 48px; height: 48px; border-radius: 50%;
+    background: var(--glass); border: 1px solid var(--line);
+    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+    display: grid; place-items: center;
+  }
+  .badge {
+    position: absolute; top: -3px; right: -3px; min-width: 20px; height: 20px; padding: 0 5px;
+    border-radius: 10px; background: var(--brass); color: #1a1205; font-size: 12px; font-weight: 700;
+    display: grid; place-items: center;
+  }
+  .recording .rdot { display: inline-block; }
+
+  /* bottom controls */
+  #bottom {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    padding: 40px 16px calc(env(safe-area-inset-bottom) + 20px);
+    background: linear-gradient(transparent, rgba(0,0,0,.7));
+  }
+  #status {
+    text-align: center; min-height: 40px; margin: 0 auto 14px; max-width: 360px;
+    font-size: 14px; color: rgba(255,255,255,.88); font-variant-numeric: tabular-nums;
+    text-shadow: 0 1px 6px rgba(0,0,0,.6);
+  }
+  #controls { display: flex; align-items: center; justify-content: space-between; max-width: 380px; margin: 0 auto; }
+  .side {
+    width: 76px; height: 76px; border-radius: 50%;
+    background: var(--glass); border: 1px solid var(--line);
+    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    font-size: 11px; font-weight: 600; letter-spacing: .02em;
+  }
+  .side.on { background: var(--brass); color: #1a1205; border-color: transparent; }
+  .side.armed { background: var(--rec); border-color: transparent; }
+  #playBtn svg.i { fill: currentColor; stroke: none; }
+
+  #recWrap { position: relative; width: 116px; height: 116px; }
+  #ring { position: absolute; inset: 0; transform: rotate(-90deg); }
+  #ring circle { fill: none; stroke-width: 4; }
+  #ring .trk { stroke: rgba(255,255,255,.18); }
+  #arc { stroke: var(--brass); stroke-linecap: round; stroke-dasharray: 289.03; stroke-dashoffset: 289.03; }
+  .first #ring .trk { stroke: var(--rec); animation: pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 50% { stroke-opacity: .25; } }
+  #recBtn {
+    position: absolute; inset: 12px; border-radius: 50%; border: 4px solid #fff;
+    background: transparent; display: grid; place-items: center; padding: 0;
+  }
+  #recDot { width: 70px; height: 70px; border-radius: 50%; background: var(--rec); transition: all .18s ease; }
+  .recording #recDot, .finishing #recDot { width: 34px; height: 34px; border-radius: 8px; }
+  .finishing #recDot { animation: blink .6s ease-in-out infinite; }
+  .processing #recDot { width: 20px; height: 20px; background: #888; }
+  @keyframes blink { 50% { opacity: .35; } }
+
+  /* overlays */
+  .overlay {
+    position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: calc(env(safe-area-inset-top) + 24px) 24px calc(env(safe-area-inset-bottom) + 24px);
+    background: #0b0b0c; z-index: 30;
+  }
+  .hidden { display: none !important; }
+  #start h1 { margin: 0 0 6px; font-size: 40px; letter-spacing: -.03em; }
+  #start .mark { width: 72px; height: 72px; margin-bottom: 18px; }
+  #start ol { margin: 14px 0 26px; padding-left: 22px; max-width: 340px; color: var(--dim); }
+  #start li { margin: 8px 0; }
+  #start li b { color: #fff; font-weight: 600; }
+  .primary {
+    border: 0; border-radius: 16px; padding: 16px 28px; min-width: 220px;
+    background: var(--rec); color: #fff; font-size: 17px; font-weight: 700;
+  }
+  #startErr { color: #ff8a80; max-width: 320px; text-align: center; min-height: 20px; margin-top: 14px; }
+
+  /* sheets */
+  .sheet { position: absolute; inset: 0; z-index: 20; background: rgba(0,0,0,.45); opacity: 0; pointer-events: none; transition: opacity .2s; }
+  .sheet.open { opacity: 1; pointer-events: auto; }
+  .card {
+    position: absolute; left: 0; right: 0; bottom: 0; max-height: 82%; overflow-y: auto;
+    background: var(--sheet); border-radius: 22px 22px 0 0;
+    padding: 18px 16px calc(env(safe-area-inset-bottom) + 18px);
+    transform: translateY(100%); transition: transform .25s ease;
+    -webkit-overflow-scrolling: touch;
+  }
+  .sheet.open .card { transform: none; }
+  .card { max-width: 560px; margin: 0 auto; }
+  .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .head h2 { margin: 0; font-size: 20px; }
+  .done { border: 0; background: none; color: var(--brass); font-weight: 700; font-size: 16px; padding: 8px 4px; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--row); border-radius: 14px; padding: 12px 14px; margin-top: 10px; min-height: 56px; }
+  .row > span { font-weight: 600; }
+  select { font: inherit; color: #fff; background: #333; border: 0; border-radius: 10px; padding: 8px 10px; max-width: 62%; }
+  input[type=range] { width: 55%; accent-color: var(--brass); }
+  .hint { color: var(--dim); font-size: 13px; margin: 6px 4px 0; }
+  .nudge { display: flex; align-items: center; gap: 8px; }
+  .nudge button { width: 48px; height: 40px; border-radius: 10px; border: 0; background: #333; font-weight: 700; }
+  .nudge output { min-width: 86px; text-align: center; font-variant-numeric: tabular-nums; font-size: 14px; }
+  .take { display: flex; gap: 10px; margin-top: 10px; }
+  .tplay { flex: 1; display: flex; justify-content: space-between; align-items: center; text-align: left; border: 0; border-radius: 14px; background: var(--row); padding: 0 16px; height: 58px; }
+  .tplay small { color: var(--dim); font-variant-numeric: tabular-nums; }
+  .tsave { border: 0; border-radius: 14px; background: #2f2a1e; color: var(--brass); font-weight: 700; padding: 0 18px; height: 58px; }
+  .wide { display: block; width: 100%; margin-top: 14px; border: 0; border-radius: 14px; height: 54px; font-weight: 700; font-size: 16px; }
+  .wide.go { background: var(--brass); color: #1a1205; }
+  .wide.danger { background: transparent; color: #ff6b61; border: 1px solid rgba(255,107,97,.35); }
+  .empty { color: var(--dim); text-align: center; padding: 24px 0; }
+
+  #player { background: #000; padding: 0; }
+  #pv { width: 100%; height: 100%; object-fit: contain; }
+  #pvClose { position: absolute; top: calc(env(safe-area-inset-top) + 12px); right: 16px; border: 0; border-radius: 20px; padding: 10px 18px; background: rgba(40,40,44,.85); font-weight: 700; }
+
+  #toast {
+    position: absolute; left: 50%; top: calc(env(safe-area-inset-top) + 74px); transform: translate(-50%, -10px);
+    background: rgba(24,24,26,.92); border: 1px solid var(--line); border-radius: 14px; padding: 10px 16px;
+    font-size: 14px; max-width: calc(100% - 32px); text-align: center; opacity: 0; transition: all .2s; z-index: 40; pointer-events: none;
+  }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+</style>
+</head>
+<body>
+<div id="app">
+  <video id="preview" playsinline muted autoplay></video>
+
+  <div id="top">
+    <div id="layerTag">
+      <span id="layerNum">Layer 1</span>
+      <span id="loopLen">no loop yet</span>
+    </div>
+    <div class="topBtns">
+      <button id="takesBtn" class="icon" aria-label="Takes">
+        <svg class="i" viewBox="0 0 24 24"><path d="M12 3 3 7.5 12 12l9-4.5L12 3Z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/></svg>
+        <span id="takeCount" class="badge" hidden>0</span>
+      </button>
+      <button id="flipBtn" class="icon" aria-label="Flip camera">
+        <svg class="i" viewBox="0 0 24 24"><path d="M3.5 8.5h3l1.8-2.5h7.4l1.8 2.5h3v11h-17z"/><path d="M9.2 12.6a3 3 0 0 1 5.4-.6M14.8 14.4a3 3 0 0 1-5.4.6"/><path d="M14.8 10.4v1.8H13M9.2 16.6v-1.8H11"/></svg>
+      </button>
+      <button id="setBtn" class="icon" aria-label="Settings">
+        <svg class="i" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <div id="bottom">
+    <div id="status"></div>
+    <div id="controls">
+      <button id="undoBtn" class="side" aria-label="Undo last layer">
+        <svg class="i" viewBox="0 0 24 24"><path d="M9 5 4 10l5 5"/><path d="M4 10h10a5.5 5.5 0 0 1 0 11h-3"/></svg>
+        <span id="undoLbl">Undo</span>
+      </button>
+      <div id="recWrap">
+        <svg id="ring" viewBox="0 0 100 100" aria-hidden="true"><circle class="trk" cx="50" cy="50" r="46"/><circle id="arc" cx="50" cy="50" r="46"/></svg>
+        <button id="recBtn" aria-label="Record"><span id="recDot"></span></button>
+      </div>
+      <button id="playBtn" class="side" aria-label="Preview loop">
+        <svg class="i" viewBox="0 0 24 24" id="playIco"><path d="M8 5.5v13l10.5-6.5z"/></svg>
+        <span>Loop</span>
+      </button>
+    </div>
+  </div>
+
+  <div id="takesSheet" class="sheet">
+    <div class="card">
+      <div class="head"><h2>Takes</h2><button class="done" data-close>Done</button></div>
+      <div id="takeList"></div>
+      <button id="saveAll" class="wide go">Save all to Photos</button>
+      <button id="newSess" class="wide danger">New session</button>
+    </div>
+  </div>
+
+  <div id="setSheet" class="sheet">
+    <div class="card">
+      <div class="head"><h2>Settings</h2><button class="done" data-close>Done</button></div>
+      <label class="row"><span>Microphone</span><select id="micSel"></select></label>
+      <p class="hint" id="micNow"></p>
+      <p class="hint">If the loop sounds like a phone call through the car, try picking the iPhone microphone here.</p>
+      <label class="row"><span>Loop volume</span><input type="range" id="vol" min="0" max="1.5" step="0.05"></label>
+      <div class="row"><span>Sync</span><div class="nudge"><button id="nMinus">−10</button><output id="syncOut">auto</output><button id="nPlus">+10</button></div></div>
+      <p class="hint">Sync is measured automatically from each take (that's the speaker delay). Only nudge if new layers sound early (−) or late (+).</p>
+    </div>
+  </div>
+
+  <div id="player" class="overlay hidden">
+    <video id="pv" controls playsinline></video>
+    <button id="pvClose">Close</button>
+  </div>
+
+  <div id="start" class="overlay">
+    <svg class="mark" viewBox="0 0 72 72" aria-hidden="true">
+      <circle cx="26" cy="26" r="17" fill="none" stroke="#e9b44c" stroke-opacity=".45" stroke-width="4"/>
+      <circle cx="36" cy="36" r="17" fill="none" stroke="#e9b44c" stroke-opacity=".8" stroke-width="4"/>
+      <circle cx="46" cy="46" r="15" fill="#ff3b30"/>
+    </svg>
+    <h1>Layers</h1>
+    <ol>
+      <li><b>Tap record</b>, play a phrase, then tap again on the downbeat. That's your loop.</li>
+      <li><b>Tap record again.</b> The loop plays from the top while you film the next layer. Tap stop any time during your pass and it finishes the pass for you.</li>
+      <li><b>Repeat.</b> Every take is its own video in Takes.</li>
+    </ol>
+    <button id="startBtn" class="primary">Start camera</button>
+    <p id="startErr"></p>
+  </div>
+
+  <div id="toast"></div>
+</div>
+
+<script>
+(() => {
+'use strict';
+
+const $ = (id) => document.getElementById(id);
+const preview = $('preview');
+const DEFAULT_D = 0.25;          // seconds, round-trip speaker delay before first measurement
+const RING_C = 2 * Math.PI * 46;
+const PLAY_SVG = '<path d="M8 5.5v13l10.5-6.5z"/>';
+const STOP_SVG = '<rect x="6.5" y="6.5" width="11" height="11" rx="2"/>';
+
+// Audio capture worklet: streams raw mic samples tagged with the audio-clock frame they belong to.
+const WORKLET_SRC = `
+class Cap extends AudioWorkletProcessor {
+  constructor() { super(); this.size = 2048; this.buf = new Float32Array(this.size); this.n = 0; this.start = 0; }
+  process(inputs) {
+    const ch = inputs[0] && inputs[0][0];
+    if (ch) {
+      if (this.n === 0) this.start = currentFrame;
+      for (let i = 0; i < ch.length; i++) {
+        this.buf[this.n++] = ch[i];
+        if (this.n === this.size) {
+          this.port.postMessage({ f: this.start, d: this.buf }, [this.buf.buffer]);
+          this.buf = new Float32Array(this.size); this.n = 0; this.start = currentFrame + i + 1;
+        }
+      }
+    }
+    return true;
+  }
+}
+registerProcessor('cap', Cap);
+`;
+
+// ---------- persistent prefs ----------
+function load(k, d) { try { const v = localStorage.getItem('layers.' + k); return v === null ? d : v; } catch (e) { return d; } }
+function save(k, v) { try { localStorage.setItem('layers.' + k, String(v)); } catch (e) {} }
+function num(v, d) { const n = parseFloat(v); return isFinite(n) ? n : d; }
+
+const S = {
+  ready: false, ctx: null, capNode: null, micSrc: null, gain: null, stream: null,
+  facing: load('facing', 'user'), micId: load('micId', ''),
+  nudge: num(load('nudge', 0), 0), vol: num(load('vol', 1), 1),
+  autoD: (() => { const a = load('autoD', ''); return a === '' ? null : num(a, null); })(),
+  takes: [], state: 'idle', previewing: false,
+  rec: null, recChunks: [], recStopped: null, recWall: 0,
+  pre: [], cap: [], capturing: false,
+  T0: 0, F0: 0, loopFrames: 0, endB: 0, stopTimer: null,
+  src: null, srcGain: null, srcStart: 0, srcLen: 0, buf: null, bufId: null,
+  wake: null, lastStatus: null
+};
+
+// ---------- storage (so takes survive the app reloading) ----------
+const DB = {
+  db: null,
+  open() {
+    return new Promise((res) => {
+      try {
+        const rq = indexedDB.open('layers', 1);
+        rq.onupgradeneeded = () => rq.result.createObjectStore('takes', { keyPath: 'id' });
+        rq.onsuccess = () => { this.db = rq.result; res(true); };
+        rq.onerror = () => res(false);
+      } catch (e) { res(false); }
+    });
+  },
+  run(mode, fn) {
+    return new Promise((res) => {
+      if (!this.db) return res(null);
+      try {
+        const r = fn(this.db.transaction('takes', mode).objectStore('takes'));
+        r.onsuccess = () => res(r.result); r.onerror = () => res(null);
+      } catch (e) { res(null); }
+    });
+  },
+  put(t) { return this.run('readwrite', (s) => s.put(t)); },
+  del(id) { return this.run('readwrite', (s) => s.delete(id)); },
+  all() { return this.run('readonly', (s) => s.getAll()).then((r) => r || []); },
+  clear() { return this.run('readwrite', (s) => s.clear()); }
+};
+
+// ---------- small utils ----------
+function toast(msg, ms) {
+  const t = $('toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), ms || 2800);
+}
+function fmtClock(s) { s = Math.max(0, s); const m = Math.floor(s / 60); const r = s - m * 60; return m + ':' + (r < 10 ? '0' : '') + r.toFixed(1); }
+function fmtDur(s) { s = Math.max(0, Math.round(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const lastTake = () => S.takes[S.takes.length - 1] || null;
+const currentD = () => (S.autoD != null ? S.autoD : DEFAULT_D) + S.nudge / 1000;
+
+function resample(x, from, to) {
+  if (from === to) return x;
+  const n = Math.round(x.length * to / from), y = new Float32Array(n), r = from / to;
+  for (let i = 0; i < n; i++) { const p = i * r, j = Math.floor(p), f = p - j; const a = x[j] || 0, b = x[j + 1] || 0; y[i] = a + (b - a) * f; }
+  return y;
+}
+function currentLoop() {
+  const t = lastTake(); if (!t || !S.ctx) return null;
+  const sr = S.ctx.sampleRate;
+  if (!t._rs || t._rsRate !== sr) { t._rs = resample(t.loop, t.loopSr, sr); t._rsRate = sr; }
+  return t._rs;
+}
+
+// Pull a frame range [f0, f1) out of the captured chunks (zeros where nothing arrived).
+function extract(chunks, f0, f1) {
+  const out = new Float32Array(Math.max(0, f1 - f0));
+  for (const c of chunks) {
+    const a = Math.max(f0, c.f), b = Math.min(f1, c.f + c.d.length);
+    if (b > a) out.set(c.d.subarray(a - c.f, b - c.f), a - f0);
+  }
+  return out;
+}
+function decimate(x, f) {
+  const n = Math.floor(x.length / f), y = new Float32Array(n);
+  for (let i = 0; i < n; i++) { let s = 0; const o = i * f; for (let j = 0; j < f; j++) s += x[o + j]; y[i] = s / f; }
+  return y;
+}
+
+// Find how late the loop shows up in the new take (speaker + mic delay) by cross-correlating
+// the captured audio against the loop that was played. Returns seconds.
+function measureD(cap, loop, sr, winSec) {
+  if (!loop || !loop.length) return { ok: false };
+  const maxLag = Math.round(1.2 * sr);
+  const W = Math.min(Math.round(winSec * sr), cap.length - maxLag);
+  if (W < 0.6 * sr) return { ok: false };
+  const p = new Float32Array(W);
+  for (let i = 0; i < W; i++) p[i] = loop[i % loop.length];
+  const f = Math.max(1, Math.round(sr / 3000));
+  const pc = decimate(p, f), cc = decimate(cap.subarray(0, W + maxLag), f);
+  const ml = Math.floor(maxLag / f), wn = pc.length;
+  let best = -1, bk = 0;
+  for (let k = 0; k <= ml; k++) {
+    let s = 0;
+    for (let i = 0; i < wn; i++) s += cc[i + k] * pc[i];
+    s = Math.abs(s);
+    if (s > best) { best = s; bk = k; }
+  }
+  // refine at full rate around the coarse peak
+  const Wf = Math.min(W, Math.round(2.5 * sr));
+  const lo = Math.max(0, bk * f - 2 * f), hi = Math.min(maxLag, bk * f + 2 * f);
+  let best2 = -1, k2 = bk * f;
+  for (let k = lo; k <= hi; k++) {
+    let s = 0;
+    for (let i = 0; i < Wf; i++) s += cap[i + k] * p[i];
+    s = Math.abs(s);
+    if (s > best2) { best2 = s; k2 = k; }
+  }
+  let ep = 0, ec = 0;
+  for (let i = 0; i < Wf; i++) { ep += p[i] * p[i]; ec += cap[i + k2] * cap[i + k2]; }
+  const ncc = (ep > 1e-9 && ec > 1e-9) ? best2 / Math.sqrt(ep * ec) : 0;
+  return { ok: ncc > 0.12, D: k2 / sr, ncc };
+}
+
+function fadeEdges(x, sr) {
+  const a = Math.min(Math.round(0.003 * sr), x.length >> 2), b = Math.min(Math.round(0.008 * sr), x.length >> 2);
+  for (let i = 0; i < a; i++) x[i] *= i / a;
+  for (let i = 0; i < b; i++) x[x.length - 1 - i] *= i / b;
+  return x;
+}
+// Cut one pass out of the take and blend its tail into the audio just before it, so the loop seam is smooth.
+function cutLoop(cap, s, len, sr) {
+  const out = cap.slice(s, s + len);
+  const X = Math.min(Math.round(0.012 * sr), s, len >> 2);
+  for (let i = 0; i < X; i++) { const w = (i + 1) / X, j = len - X + i; out[j] = out[j] * (1 - w) + cap[s - X + i] * w; }
+  return out;
+}
+
+// ---------- capture stream ----------
+function onCapChunk(e) {
+  const c = e.data;
+  S.pre.push(c); if (S.pre.length > 40) S.pre.shift();
+  if (S.capturing) S.cap.push(c);
+}
+function arrivedFrame() { const c = S.cap[S.cap.length - 1]; return c ? c.f + c.d.length : 0; }
+function waitForCapture(F) {
+  return new Promise((res) => {
+    const t0 = performance.now();
+    (function chk() { if (arrivedFrame() >= F || performance.now() - t0 > 900) return res(); setTimeout(chk, 30); })();
+  });
+}
+
+// ---------- loop playback ----------
+function loopBuffer() {
+  const t = lastTake(); if (!t) return null;
+  if (S.buf && S.bufId === t.id) return S.buf;
+  const d = currentLoop();
+  const b = S.ctx.createBuffer(1, d.length, S.ctx.sampleRate);
+  b.getChannelData(0).set(d);
+  S.buf = b; S.bufId = t.id;
+  return b;
+}
+function playLoop(when) {
+  stopLoop();
+  const b = loopBuffer(); if (!b) return;
+  const src = S.ctx.createBufferSource(); src.buffer = b; src.loop = true;
+  const g = S.ctx.createGain();
+  src.connect(g); g.connect(S.gain);
+  src.start(when);
+  S.src = src; S.srcGain = g; S.srcStart = when; S.srcLen = b.duration;
+}
+function stopLoop() {
+  if (!S.src) return;
+  const t = S.ctx.currentTime;
+  try { S.srcGain.gain.setTargetAtTime(0, t, 0.02); S.src.stop(t + 0.15); } catch (e) { try { S.src.stop(); } catch (_) {} }
+  S.src = null; S.srcGain = null; S.srcLen = 0;
+}
+function togglePreview() {
+  if (S.state !== 'idle' || !S.takes.length) return;
+  if (S.previewing) stopPreview();
+  else { S.ctx.resume().catch(() => {}); playLoop(S.ctx.currentTime + 0.05); S.previewing = true; }
+  render();
+}
+function stopPreview() { if (S.previewing) { stopLoop(); S.previewing = false; } }
+
+// ---------- recording ----------
+function pickMime() {
+  const list = ['video/mp4;codecs=avc1,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+  for (const m of list) { try { if (window.MediaRecorder && MediaRecorder.isTypeSupported(m)) return m; } catch (e) {} }
+  return '';
+}
+
+async function onRec() {
+  if (!S.ready) return;
+  if (S.ctx.state !== 'running') { try { await S.ctx.resume(); } catch (e) {} }
+  if (S.state === 'idle') startRec();
+  else if (S.state === 'recording') requestStop();
+}
+
+function startRec() {
+  const loop = S.takes.length ? currentLoop() : null;
+  stopPreview();
+  const mime = pickMime();
+  let rec;
+  try { rec = new MediaRecorder(S.stream, mime ? { mimeType: mime, videoBitsPerSecond: 10000000, audioBitsPerSecond: 256000 } : undefined); }
+  catch (e) { try { rec = new MediaRecorder(S.stream); } catch (e2) { toast('Video recording isn\'t supported here'); return; } }
+  S.rec = rec; S.recChunks = [];
+  rec.ondataavailable = (ev) => { if (ev.data && ev.data.size) S.recChunks.push(ev.data); };
+  S.recStopped = new Promise((r) => { rec.onstop = r; });
+
+  const sr = S.ctx.sampleRate;
+  S.cap = S.pre.slice(); S.capturing = true;
+  if (loop) { S.T0 = S.ctx.currentTime + 0.12; playLoop(S.T0); S.loopFrames = loop.length; }
+  else { S.T0 = S.ctx.currentTime; S.loopFrames = 0; }
+  S.F0 = Math.round(S.T0 * sr);
+  try { rec.start(); } catch (e) { cancelRec('Couldn\'t start recording'); return; }
+  S.recWall = performance.now();
+  S.endB = 0; S.state = 'recording';
+  render();
+}
+
+function requestStop() {
+  const sr = S.ctx.sampleRate, now = S.ctx.currentTime;
+  if (!S.loopFrames) {                       // layer 1: the tap closes the loop
+    if (now - S.T0 < 0.5) { cancelRec('Too short — try again'); return; }
+    finishRec(now);
+    return;
+  }
+  // Overdub: work out which pass you're in and finish it.
+  const L = S.loopFrames / sr;
+  let D = currentD();
+  if (arrivedFrame() - S.F0 > 1.8 * sr) {
+    const r = measureD(extract(S.cap, S.F0, arrivedFrame()), currentLoop(), sr, 3);
+    if (r.ok) D = r.D + S.nudge / 1000;
+  }
+  const heard = now - S.T0 - D;
+  const grace = Math.min(0.6, 0.2 * L);
+  if (heard < grace) { cancelRec('Cancelled'); return; }
+  const m = Math.floor(heard / L), frac = heard / L - m;
+  const endB = (frac * L < grace && m >= 1) ? m : m + 1;   // a tap just after a downbeat counts for the pass that just ended
+  const stopAt = S.T0 + D + endB * L + 0.3;
+  S.endB = endB; S.state = 'finishing'; render();
+  S.stopTimer = setTimeout(() => finishRec(stopAt), Math.max(0, (stopAt - S.ctx.currentTime) * 1000));
+}
+
+async function finishRec(endTime) {
+  const rec = S.rec;
+  S.state = 'processing'; render();
+  const sr = S.ctx.sampleRate;
+  const Fend = Math.round(endTime * sr);
+  stopLoop();
+  try { if (rec && rec.state !== 'inactive') rec.stop(); } catch (e) {}
+  await Promise.race([S.recStopped, sleep(4000)]);
+  await waitForCapture(Fend);
+  S.capturing = false;
+  if (S.rec !== rec) return; // cancelled meanwhile
+
+  const mime = (rec && rec.mimeType) || pickMime() || 'video/mp4';
+  const blob = new Blob(S.recChunks, { type: mime });
+  const dur = (performance.now() - S.recWall) / 1000;
+  const cap = extract(S.cap, S.F0, Fend);
+  S.cap = [];
+  await sleep(0);
+
+  let loop, note, D = null;
+  if (!S.loopFrames) {
+    loop = fadeEdges(cap, sr);
+    note = 'loop set · ' + (loop.length / sr).toFixed(1) + 's';
+  } else {
+    const prev = currentLoop();
+    const r = measureD(cap, prev, sr, 6);
+    if (r.ok) { S.autoD = r.D; save('autoD', r.D); }
+    D = currentD();
+    const len = S.loopFrames;
+    const s = Math.max(0, Math.round(D * sr) + (S.endB - 1) * len);
+    if (s + len <= cap.length) {
+      loop = cutLoop(cap, s, len, sr);
+      note = r.ok ? 'synced ' + Math.round(r.D * 1000) + ' ms' : 'synced (estimated)';
+    } else if (s < cap.length && s + len - cap.length < 0.35 * sr) {
+      loop = new Float32Array(len); loop.set(cap.subarray(s)); fadeEdges(loop, sr);
+      note = 'synced';
+    } else {
+      loop = prev; note = 'couldn\'t sync, kept the old loop';
+    }
+  }
+
+  const n = S.takes.length + 1;
+  const ext = mime.indexOf('mp4') >= 0 ? 'mp4' : (mime.indexOf('webm') >= 0 ? 'webm' : 'mov');
+  const take = { id: Date.now() + '-' + n, n, blob, mime, ext, dur, loop, loopSr: sr, D };
+  S.takes.push(take);
+  DB.put({ id: take.id, n, blob, mime, ext, dur, loop, loopSr: sr, D });
+  S.rec = null; S.state = 'idle';
+  render();
+  toast('Layer ' + n + ' saved · ' + note + (blob.size ? '' : ' · video was empty'));
+}
+
+function cancelRec(msg) {
+  clearTimeout(S.stopTimer);
+  stopLoop();
+  const rec = S.rec; S.rec = null;
+  if (rec) { rec.ondataavailable = null; try { if (rec.state !== 'inactive') rec.stop(); } catch (e) {} }
+  S.capturing = false; S.cap = []; S.state = 'idle';
+  render();
+  if (msg) toast(msg);
+}
+
+// ---------- camera ----------
+async function openCamera() {
+  if (S.stream) { S.stream.getTracks().forEach((t) => t.stop()); S.stream = null; }
+  const audio = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
+  if (S.micId) audio.deviceId = { exact: S.micId };
+  const video = { facingMode: S.facing, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } };
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ video, audio }); }
+  catch (e) {
+    if (S.micId && (e.name === 'OverconstrainedError' || e.name === 'NotFoundError')) {
+      S.micId = ''; save('micId', ''); delete audio.deviceId;
+      stream = await navigator.mediaDevices.getUserMedia({ video, audio });
+    } else throw e;
+  }
+  S.stream = stream;
+  preview.srcObject = stream;
+  preview.classList.toggle('mirror', S.facing === 'user');
+  try { await preview.play(); } catch (e) {}
+  if (S.micSrc) { try { S.micSrc.disconnect(); } catch (e) {} }
+  S.micSrc = S.ctx.createMediaStreamSource(stream);
+  S.micSrc.connect(S.capNode);
+  fillMics();
+}
+
+async function fillMics() {
+  const sel = $('micSel');
+  let devs = [];
+  try { devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audioinput'); } catch (e) {}
+  sel.innerHTML = '';
+  sel.add(new Option('Automatic', ''));
+  devs.forEach((d, i) => sel.add(new Option(d.label || ('Microphone ' + (i + 1)), d.deviceId)));
+  sel.value = S.micId || '';
+  const tr = S.stream && S.stream.getAudioTracks()[0];
+  $('micNow').textContent = tr ? 'Recording from: ' + (tr.label || 'microphone') : '';
+}
+
+async function requestWake() {
+  try { if ('wakeLock' in navigator && !document.hidden) S.wake = await navigator.wakeLock.request('screen'); } catch (e) {}
+}
+
+// ---------- UI ----------
+function setStatus(t) { if (t !== S.lastStatus) { $('status').textContent = t; S.lastStatus = t; } }
+
+function render() {
+  const n = S.takes.length, st = S.state, idle = st === 'idle';
+  const app = $('app');
+  app.classList.toggle('recording', st === 'recording');
+  app.classList.toggle('finishing', st === 'finishing');
+  app.classList.toggle('processing', st === 'processing');
+  app.classList.toggle('first', st === 'recording' && !S.loopFrames);
+  $('layerNum').textContent = 'Layer ' + (n + 1);
+  const lt = lastTake();
+  $('loopLen').textContent = lt ? (lt.loop.length / lt.loopSr).toFixed(1) + 's loop · ' + n + (n === 1 ? ' take' : ' takes') : 'no loop yet';
+  $('undoBtn').disabled = !idle || !n;
+  $('playBtn').disabled = !idle || !n;
+  $('playBtn').classList.toggle('on', S.previewing);
+  $('playIco').innerHTML = S.previewing ? STOP_SVG : PLAY_SVG;
+  $('flipBtn').disabled = !idle; $('setBtn').disabled = !idle; $('takesBtn').disabled = !idle;
+  $('recBtn').disabled = st === 'finishing' || st === 'processing';
+  const b = $('takeCount'); b.textContent = n; b.hidden = !n;
+  if (st !== 'recording') {
+    if (st === 'processing') setStatus('Syncing the new layer…');
+    else if (st === 'finishing') setStatus('Finishing this pass…');
+    else if (!n) setStatus('Tap to record layer 1. Tap again on the downbeat to close the loop.');
+    else setStatus(S.previewing ? 'Playing the loop' : 'Tap to record layer ' + (n + 1) + ' over the loop');
+  }
+}
+
+function tick() {
+  requestAnimationFrame(tick);
+  if (!S.ctx) return;
+  const now = S.ctx.currentTime;
+  let phase = 0;
+  if (S.src && S.srcLen) {
+    const t = now - S.srcStart - currentD();
+    phase = t > 0 ? (t % S.srcLen) / S.srcLen : 0;
+  }
+  $('arc').style.strokeDashoffset = (RING_C * (1 - phase)).toFixed(2);
+  if (S.state === 'recording') {
+    if (!S.loopFrames) setStatus('Recording layer 1 · ' + fmtClock(now - S.T0) + '\nTap on the downbeat to close the loop');
+    else {
+      const L = S.loopFrames / S.ctx.sampleRate;
+      const pass = Math.max(1, Math.floor((now - S.T0 - currentD()) / L) + 1);
+      setStatus('Recording layer ' + (S.takes.length + 1) + ' · pass ' + pass + '\nTap stop during your pass — it finishes the pass');
+    }
+  }
+}
+
+function renderTakes() {
+  const list = $('takeList');
+  list.innerHTML = '';
+  if (!S.takes.length) list.innerHTML = '<p class="empty">No takes yet.</p>';
+  S.takes.slice().reverse().forEach((t) => {
+    const row = document.createElement('div'); row.className = 'take';
+    const a = document.createElement('button'); a.className = 'tplay';
+    a.innerHTML = '<b>Layer ' + t.n + '</b><small>' + fmtDur(t.dur) + (t.blob && t.blob.size ? '' : ' · no video') + '</small>';
+    a.onclick = () => openPlayer(t);
+    const s = document.createElement('button'); s.className = 'tsave'; s.textContent = 'Save';
+    s.onclick = () => saveTakes([t]);
+    row.append(a, s); list.append(row);
+  });
+  $('saveAll').disabled = !S.takes.length;
+}
+
+function fileFor(t) { return new File([t.blob], 'layer-' + String(t.n).padStart(2, '0') + '.' + (t.ext || 'mp4'), { type: t.mime || 'video/mp4' }); }
+async function saveTakes(takes) {
+  const files = takes.filter((t) => t.blob && t.blob.size).map(fileFor);
+  if (!files.length) { toast('Nothing to save'); return; }
+  try {
+    if (navigator.canShare && navigator.canShare({ files })) { await navigator.share({ files }); return; }
+  } catch (e) { if (e && e.name === 'AbortError') return; }
+  files.forEach((f) => { const a = document.createElement('a'); a.href = URL.createObjectURL(f); a.download = f.name; document.body.append(a); a.click(); a.remove(); });
+}
+
+function openPlayer(t) {
+  if (!t.blob || !t.blob.size) return;
+  stopPreview(); render();
+  const pv = $('pv');
+  pv.src = URL.createObjectURL(t.blob);
+  $('player').classList.remove('hidden');
+  pv.play().catch(() => {});
+}
+function closePlayer() {
+  const pv = $('pv'); pv.pause();
+  if (pv.src) URL.revokeObjectURL(pv.src);
+  pv.removeAttribute('src'); pv.load();
+  $('player').classList.add('hidden');
+}
+
+function openSheet(id) { $(id).classList.add('open'); }
+function closeSheets() { document.querySelectorAll('.sheet.open').forEach((s) => s.classList.remove('open')); }
+function syncText() {
+  const base = Math.round((S.autoD != null ? S.autoD : DEFAULT_D) * 1000);
+  $('syncOut').textContent = base + ' ms' + (S.nudge ? ' ' + (S.nudge > 0 ? '+' : '−') + Math.abs(S.nudge) : '') + (S.autoD == null ? '*' : '');
+}
+
+// ---------- wire up ----------
+$('status').style.whiteSpace = 'pre-line';
+$('recBtn').onclick = onRec;
+$('playBtn').onclick = togglePreview;
+
+let undoArmed = 0, undoTimer = null;
+$('undoBtn').onclick = () => {
+  if (S.state !== 'idle' || !S.takes.length) return;
+  const btn = $('undoBtn');
+  if (Date.now() - undoArmed > 2500) {
+    undoArmed = Date.now(); btn.classList.add('armed'); $('undoLbl').textContent = 'Sure?';
+    clearTimeout(undoTimer);
+    undoTimer = setTimeout(() => { btn.classList.remove('armed'); $('undoLbl').textContent = 'Undo'; }, 2500);
+    return;
+  }
+  undoArmed = 0; clearTimeout(undoTimer); btn.classList.remove('armed'); $('undoLbl').textContent = 'Undo';
+  stopPreview();
+  const t = S.takes.pop(); DB.del(t.id); S.buf = null;
+  render(); toast('Removed layer ' + t.n + ' — back to the previous loop');
+};
+
+$('flipBtn').onclick = async () => {
+  if (S.state !== 'idle') return;
+  S.facing = S.facing === 'user' ? 'environment' : 'user'; save('facing', S.facing);
+  try { await openCamera(); } catch (e) { toast('Couldn\'t switch camera'); }
+};
+$('setBtn').onclick = () => { syncText(); $('vol').value = S.vol; fillMics(); openSheet('setSheet'); };
+$('takesBtn').onclick = () => { renderTakes(); openSheet('takesSheet'); };
+document.querySelectorAll('[data-close]').forEach((b) => (b.onclick = closeSheets));
+document.querySelectorAll('.sheet').forEach((s) => s.addEventListener('click', (e) => { if (e.target === s) closeSheets(); }));
+
+$('micSel').onchange = async (e) => {
+  S.micId = e.target.value; save('micId', S.micId);
+  try { await openCamera(); toast('Microphone changed'); } catch (err) { toast('Couldn\'t use that microphone'); }
+};
+$('vol').oninput = (e) => { S.vol = num(e.target.value, 1); save('vol', S.vol); if (S.gain) S.gain.gain.value = S.vol; };
+$('nMinus').onclick = () => { S.nudge -= 10; save('nudge', S.nudge); syncText(); };
+$('nPlus').onclick = () => { S.nudge += 10; save('nudge', S.nudge); syncText(); };
+
+$('saveAll').onclick = () => saveTakes(S.takes);
+$('newSess').onclick = async () => {
+  if (!S.takes.length) return;
+  if (!confirm('Delete all takes and start a new session? Save anything you want to keep first.')) return;
+  stopPreview(); S.takes = []; S.buf = null; await DB.clear();
+  renderTakes(); render(); closeSheets(); toast('New session');
+};
+$('pvClose').onclick = closePlayer;
+
+$('startBtn').onclick = async () => {
+  const err = $('startErr'), btn = $('startBtn');
+  err.textContent = '';
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) {
+    err.textContent = 'This needs Safari over https — open it from your GitHub Pages link.'; return;
+  }
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!S.ctx) S.ctx = new AC({ latencyHint: 'interactive' });
+  S.ctx.resume().catch(() => {});
+  try { if (navigator.audioSession) navigator.audioSession.type = 'play-and-record'; } catch (e) {}
+  btn.disabled = true; btn.textContent = 'Starting…';
+  try {
+    if (!S.capNode) {
+      const url = URL.createObjectURL(new Blob([WORKLET_SRC], { type: 'application/javascript' }));
+      await S.ctx.audioWorklet.addModule(url);
+      S.capNode = new AudioWorkletNode(S.ctx, 'cap', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
+      S.capNode.port.onmessage = onCapChunk;
+      const mute = S.ctx.createGain(); mute.gain.value = 0;
+      S.capNode.connect(mute); mute.connect(S.ctx.destination);
+      S.gain = S.ctx.createGain(); S.gain.gain.value = S.vol; S.gain.connect(S.ctx.destination);
+    }
+    await openCamera();
+    try { await S.ctx.resume(); } catch (e) {}
+    S.ready = true;
+    $('start').classList.add('hidden');
+    requestWake(); render();
+  } catch (e) {
+    err.textContent = (e && e.name === 'NotAllowedError')
+      ? 'Camera or mic access was blocked. Allow it for Safari in iPhone Settings, then try again.'
+      : 'Couldn\'t start: ' + ((e && (e.message || e.name)) || e);
+    btn.disabled = false; btn.textContent = 'Start camera';
+  }
+};
+
+document.addEventListener('visibilitychange', async () => {
+  if (document.hidden) {
+    if (S.state === 'recording' || S.state === 'finishing') cancelRec('Take stopped — the app left the screen');
+    stopPreview(); render();
+  } else {
+    requestWake();
+    if (!S.ready) return;
+    if (S.ctx.state !== 'running') { try { await S.ctx.resume(); } catch (e) {} }
+    const live = S.stream && S.stream.getVideoTracks().some((t) => t.readyState === 'live');
+    if (!live) { try { await openCamera(); } catch (e) {} }
+  }
+});
+
+// restore saved takes
+DB.open().then(async (ok) => {
+  if (!ok) return;
+  const all = await DB.all();
+  S.takes = all.filter((t) => t && t.loop).sort((a, b) => a.n - b.n);
+  render();
+});
+
+render();
+requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>
