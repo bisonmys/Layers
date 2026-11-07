@@ -119,6 +119,7 @@
     border: 0; border-radius: 16px; padding: 16px 28px; min-width: 220px;
     background: var(--rec); color: #fff; font-size: 17px; font-weight: 700;
   }
+  .ver { position: absolute; bottom: calc(env(safe-area-inset-bottom) + 12px); color: rgba(255,255,255,.3); font-size: 12px; margin: 0; }
   #startErr { color: #ff8a80; max-width: 320px; text-align: center; min-height: 20px; margin-top: 14px; }
 
   /* sheets */
@@ -248,6 +249,7 @@
     </ol>
     <button id="startBtn" class="primary">Start camera</button>
     <p id="startErr"></p>
+    <p class="ver">v3</p>
   </div>
 
   <div id="toast"></div>
@@ -256,6 +258,16 @@
 <script>
 (() => {
 'use strict';
+
+// Show any crash on screen so it can be reported instead of silently freezing.
+function showErr(msg) {
+  try { const t = document.getElementById('toast'); t.textContent = 'Error: ' + msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 8000); } catch (e) {}
+  try { const s = document.getElementById('startErr'); if (s && !document.getElementById('start').classList.contains('hidden')) s.textContent = 'Error: ' + msg; } catch (e) {}
+}
+window.addEventListener('error', (e) => showErr(e.message || 'unknown'));
+window.addEventListener('unhandledrejection', (e) => showErr((e.reason && (e.reason.message || e.reason.name)) || String(e.reason)));
+// iOS can leave some promises (audio resume, video play) pending forever; never wait on them unbounded.
+const settle = (p, ms) => Promise.race([Promise.resolve(p).then(() => true, () => false), new Promise((r) => setTimeout(() => r(false), ms))]);
 
 const $ = (id) => document.getElementById(id);
 const preview = $('preview');
@@ -476,7 +488,7 @@ function pickMime() {
 
 async function onRec() {
   if (!S.ready) return;
-  if (S.ctx.state !== 'running') { try { await S.ctx.resume(); } catch (e) {} }
+  if (S.ctx.state !== 'running') await settle(S.ctx.resume(), 800);
   if (S.state === 'idle') startRec();
   else if (S.state === 'recording') requestStop();
 }
@@ -605,7 +617,7 @@ async function openCamera() {
   S.stream = stream;
   preview.srcObject = stream;
   preview.classList.toggle('mirror', S.facing === 'user');
-  try { await preview.play(); } catch (e) {}
+  preview.play().catch(() => {});
   if (S.micSrc) { try { S.micSrc.disconnect(); } catch (e) {} }
   S.micSrc = S.ctx.createMediaStreamSource(stream);
   S.micSrc.connect(S.capNode);
@@ -760,7 +772,7 @@ $('setBtn').onclick = () => { syncText(); $('vol').value = S.vol; $('modeSel').v
 $('modeSel').onchange = async (e) => {
   S.audioMode = e.target.value; save('audioMode', S.audioMode);
   applyAudioMode();
-  try { await openCamera(); await S.ctx.resume(); } catch (err) {}
+  try { await openCamera(); await settle(S.ctx.resume(), 1500); } catch (err) {}
   toast('Audio mode: ' + (S.audioMode === 'auto' ? 'Auto' : 'Play & record') + ' — tap Loop to test');
 };
 $('takesBtn').onclick = () => { renderTakes(); openSheet('takesSheet'); };
@@ -795,18 +807,27 @@ $('startBtn').onclick = async () => {
   S.ctx.resume().catch(() => {});
   applyAudioMode();
   btn.disabled = true; btn.textContent = 'Starting…';
+  S.step = 'audio setup';
+  const watchdog = setTimeout(() => {
+    err.textContent = 'Still starting — stuck at: ' + S.step + '. Fully close the app and reopen it. If it keeps happening, tell Claude this message.';
+    btn.disabled = false; btn.textContent = 'Try again';
+  }, 7000);
   try {
     if (!S.capNode) {
       const url = URL.createObjectURL(new Blob([WORKLET_SRC], { type: 'application/javascript' }));
-      await S.ctx.audioWorklet.addModule(url);
+      S.step = 'audio setup';
+      await settle(S.ctx.audioWorklet.addModule(url), 5000);
       S.capNode = new AudioWorkletNode(S.ctx, 'cap', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
       S.capNode.port.onmessage = onCapChunk;
       const mute = S.ctx.createGain(); mute.gain.value = 0;
       S.capNode.connect(mute); mute.connect(S.ctx.destination);
       S.gain = S.ctx.createGain(); S.gain.gain.value = S.vol; S.gain.connect(S.ctx.destination);
     }
+    S.step = 'camera';
     await openCamera();
-    try { await S.ctx.resume(); } catch (e) {}
+    S.step = 'audio start';
+    await settle(S.ctx.resume(), 1500);
+    clearTimeout(watchdog);
     S.ready = true;
     $('start').classList.add('hidden');
     requestWake(); render();
@@ -814,6 +835,7 @@ $('startBtn').onclick = async () => {
     err.textContent = (e && e.name === 'NotAllowedError')
       ? 'Camera or mic access was blocked. Allow it for Safari in iPhone Settings, then try again.'
       : 'Couldn\'t start: ' + ((e && (e.message || e.name)) || e);
+    clearTimeout(watchdog);
     btn.disabled = false; btn.textContent = 'Start camera';
   }
 };
@@ -825,16 +847,16 @@ document.addEventListener('visibilitychange', async () => {
   } else {
     requestWake();
     if (!S.ready) return;
-    if (S.ctx.state !== 'running') { try { await S.ctx.resume(); } catch (e) {} }
+    if (S.ctx.state !== 'running') await settle(S.ctx.resume(), 1500);
     const live = S.stream && S.stream.getVideoTracks().some((t) => t.readyState === 'live');
     if (!live) { try { await openCamera(); } catch (e) {} }
   }
 });
 
 // restore saved takes
-DB.open().then(async (ok) => {
-  if (!ok) return;
-  const all = await DB.all();
+settle(DB.open(), 3000).then(async (ok) => {
+  if (!ok || !DB.db) return;
+  const all = await Promise.race([DB.all(), sleep(4000).then(() => [])]);
   S.takes = all.filter((t) => t && t.loop).sort((a, b) => a.n - b.n);
   render();
 });
