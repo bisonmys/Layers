@@ -221,6 +221,8 @@
       <label class="row"><span>Microphone</span><select id="micSel"></select></label>
       <p class="hint" id="micNow"></p>
       <p class="hint">If the loop sounds like a phone call through the car, try picking the iPhone microphone here.</p>
+      <label class="row"><span>Audio mode</span><select id="modeSel"><option value="auto">Auto</option><option value="play-and-record">Play &amp; record</option></select></label>
+      <p class="hint">If the loop plays quietly out of the earpiece instead of the speaker, switch this and test again.</p>
       <label class="row"><span>Loop volume</span><input type="range" id="vol" min="0" max="1.5" step="0.05"></label>
       <div class="row"><span>Sync</span><div class="nudge"><button id="nMinus">−10</button><output id="syncOut">auto</output><button id="nPlus">+10</button></div></div>
       <p class="hint">Sync is measured automatically from each take (that's the speaker delay). Only nudge if new layers sound early (−) or late (+).</p>
@@ -291,7 +293,7 @@ function num(v, d) { const n = parseFloat(v); return isFinite(n) ? n : d; }
 
 const S = {
   ready: false, ctx: null, capNode: null, micSrc: null, gain: null, stream: null,
-  facing: load('facing', 'user'), micId: load('micId', ''),
+  facing: load('facing', 'user'), micId: load('micId', ''), audioMode: load('audioMode', 'auto'),
   nudge: num(load('nudge', 0), 0), vol: num(load('vol', 1), 1),
   autoD: (() => { const a = load('autoD', ''); return a === '' ? null : num(a, null); })(),
   takes: [], state: 'idle', previewing: false,
@@ -622,6 +624,12 @@ async function fillMics() {
   $('micNow').textContent = tr ? 'Recording from: ' + (tr.label || 'microphone') : '';
 }
 
+// 'auto' lets iOS route playback to the loudspeaker while the mic is on; forcing
+// 'play-and-record' can send it to the quiet earpiece on some iPhones.
+function applyAudioMode() {
+  try { if (navigator.audioSession) navigator.audioSession.type = S.audioMode === 'play-and-record' ? 'play-and-record' : 'auto'; } catch (e) {}
+}
+
 async function requestWake() {
   try { if ('wakeLock' in navigator && !document.hidden) S.wake = await navigator.wakeLock.request('screen'); } catch (e) {}
 }
@@ -748,7 +756,13 @@ $('flipBtn').onclick = async () => {
   S.facing = S.facing === 'user' ? 'environment' : 'user'; save('facing', S.facing);
   try { await openCamera(); } catch (e) { toast('Couldn\'t switch camera'); }
 };
-$('setBtn').onclick = () => { syncText(); $('vol').value = S.vol; fillMics(); openSheet('setSheet'); };
+$('setBtn').onclick = () => { syncText(); $('vol').value = S.vol; $('modeSel').value = S.audioMode; fillMics(); openSheet('setSheet'); };
+$('modeSel').onchange = async (e) => {
+  S.audioMode = e.target.value; save('audioMode', S.audioMode);
+  applyAudioMode();
+  try { await openCamera(); await S.ctx.resume(); } catch (err) {}
+  toast('Audio mode: ' + (S.audioMode === 'auto' ? 'Auto' : 'Play & record') + ' — tap Loop to test');
+};
 $('takesBtn').onclick = () => { renderTakes(); openSheet('takesSheet'); };
 document.querySelectorAll('[data-close]').forEach((b) => (b.onclick = closeSheets));
 document.querySelectorAll('.sheet').forEach((s) => s.addEventListener('click', (e) => { if (e.target === s) closeSheets(); }));
@@ -779,7 +793,7 @@ $('startBtn').onclick = async () => {
   const AC = window.AudioContext || window.webkitAudioContext;
   if (!S.ctx) S.ctx = new AC({ latencyHint: 'interactive' });
   S.ctx.resume().catch(() => {});
-  try { if (navigator.audioSession) navigator.audioSession.type = 'play-and-record'; } catch (e) {}
+  applyAudioMode();
   btn.disabled = true; btn.textContent = 'Starting…';
   try {
     if (!S.capNode) {
